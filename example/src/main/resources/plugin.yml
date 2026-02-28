@@ -1,0 +1,10 @@
+name: plugin-config-example
+version: ${VERSION}
+description: Example plugin demonstrating the config system
+author: Grounds Development Team and contributors
+main: gg.grounds.config.example.ExamplePaperPlugin
+
+api-version: "1.21"
+
+depend:
+  - plugin-config
