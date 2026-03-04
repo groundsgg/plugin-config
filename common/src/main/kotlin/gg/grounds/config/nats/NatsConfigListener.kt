@@ -27,6 +27,7 @@ class NatsConfigListener(private val logger: Logger) : AutoCloseable {
     private val closed = AtomicBoolean(false)
     private val reconnectDelayMs = AtomicLong(MIN_RECONNECT_DELAY_MS)
     private val subscriptions = ConcurrentHashMap<AppEnvKey, SubscriptionEntry>()
+    private val attachedSubscriptions = ConcurrentHashMap.newKeySet<AppEnvKey>()
     private var connection: Connection? = null
     private var dispatcher: Dispatcher? = null
     private var reconnectFuture: ScheduledFuture<*>? = null
@@ -48,15 +49,15 @@ class NatsConfigListener(private val logger: Logger) : AutoCloseable {
      */
     fun subscribe(app: String, env: String, onChangeReceived: () -> Unit) {
         val key = AppEnvKey(app, env)
-        if (subscriptions.containsKey(key)) {
+        val entry = SubscriptionEntry(app, env, onChangeReceived)
+        val previousEntry = subscriptions.putIfAbsent(key, entry)
+        if (previousEntry != null) {
             logger.debug("NATS subscription already exists (app={}, env={})", app, env)
             return
         }
-        val entry = SubscriptionEntry(app, env, onChangeReceived)
-        subscriptions[key] = entry
         val disp = dispatcher
         if (disp != null) {
-            attachSubscription(disp, entry)
+            attachSubscription(disp, key, entry)
         }
     }
 
@@ -69,9 +70,10 @@ class NatsConfigListener(private val logger: Logger) : AutoCloseable {
             val conn = Nats.connect(options)
             connection = conn
             val disp = conn.createDispatcher()
+            attachedSubscriptions.clear()
             dispatcher = disp
-            for (entry in subscriptions.values) {
-                attachSubscription(disp, entry)
+            for ((key, entry) in subscriptions.entries) {
+                attachSubscription(disp, key, entry)
             }
             resetBackoff()
             logger.info(
@@ -89,7 +91,15 @@ class NatsConfigListener(private val logger: Logger) : AutoCloseable {
         }
     }
 
-    private fun attachSubscription(dispatcher: Dispatcher, entry: SubscriptionEntry) {
+    private fun attachSubscription(
+        dispatcher: Dispatcher,
+        key: AppEnvKey,
+        entry: SubscriptionEntry,
+    ) {
+        if (!attachedSubscriptions.add(key)) {
+            logger.debug("NATS subscription attach skipped (app={}, env={})", entry.app, entry.env)
+            return
+        }
         val subject = "config.${entry.app}.${entry.env}.changed"
         dispatcher.subscribe(subject) { message ->
             logger.debug(
@@ -128,6 +138,7 @@ class NatsConfigListener(private val logger: Logger) : AutoCloseable {
             dispatcher = null
             connection?.close()
             connection = null
+            attachedSubscriptions.clear()
         } catch (error: Exception) {
             logger.warn("Error closing NATS connection (error={})", error.message)
         }
