@@ -19,11 +19,15 @@ internal class AppEnvScope(val app: String, val env: String) {
 
     fun binding(key: ConfigKey): ConfigBinding<*>? = bindings[key]
 
+    fun bindingsSnapshot(): Map<ConfigKey, ConfigBinding<*>> = bindings.toMap()
+
     fun version(): Long = currentVersion.get()
 
     fun setVersion(version: Long): Long = currentVersion.getAndSet(version)
 
     fun markSubscriptionStarted(): Boolean = subscriptionStarted.compareAndSet(false, true)
+
+    fun hasUninitializedBindings(): Boolean = bindings.values.any { !it.initialized() }
 
     fun withRefreshLock(block: () -> Unit) {
         synchronized(refreshLock) { block() }

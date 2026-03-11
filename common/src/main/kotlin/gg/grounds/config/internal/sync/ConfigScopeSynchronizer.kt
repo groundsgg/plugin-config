@@ -8,6 +8,11 @@ import gg.grounds.config.nats.NatsConfigListener
 import gg.grounds.grpc.config.ConfigDefault
 import gg.grounds.grpc.config.ConfigDocument
 import gg.grounds.grpc.config.SyncDefaultsRequest
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import org.slf4j.Logger
 import tools.jackson.databind.DeserializationFeature
 import tools.jackson.databind.ObjectMapper
@@ -17,8 +22,14 @@ import tools.jackson.module.kotlin.jacksonMapperBuilder
 internal class ConfigScopeSynchronizer(private val logger: Logger) : AutoCloseable {
     private val objectMapper: ObjectMapper =
         jacksonMapperBuilder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build()
+    private val refreshExecutor: ScheduledExecutorService =
+        Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "config-scope-refresh").apply { isDaemon = true }
+        }
+    private val trackedScopes = ConcurrentHashMap.newKeySet<AppEnvScope>()
     private var grpcClient: GrpcConfigClient? = null
     private var natsListener: NatsConfigListener? = null
+    private var refreshFuture: ScheduledFuture<*>? = null
 
     fun start(grpcTarget: String, natsUrl: String) {
         close()
@@ -27,19 +38,39 @@ internal class ConfigScopeSynchronizer(private val logger: Logger) : AutoCloseab
         listener.start(natsUrl)
         grpcClient = client
         natsListener = listener
+        refreshFuture =
+            refreshExecutor.scheduleWithFixedDelay(
+                { refreshTrackedScopes() },
+                REFRESH_INTERVAL_SECONDS,
+                REFRESH_INTERVAL_SECONDS,
+                TimeUnit.SECONDS,
+            )
     }
 
     fun bootstrap(scope: AppEnvScope, binding: ConfigBinding<*>) {
         val client = grpcClient ?: return
         val listener = natsListener ?: return
+        trackedScopes.add(scope)
         scope.withRefreshLock {
             syncDefault(client, scope, binding)
-            loadSnapshot(client, scope)
+            try {
+                refreshScope(client, scope, forceFullSnapshot = true)
+            } catch (error: Exception) {
+                logger.error(
+                    "Config snapshot load failed (app={}, env={}, reason=initial_snapshot_failed)",
+                    scope.app,
+                    scope.env,
+                    error,
+                )
+            }
             subscribeToChanges(listener, scope)
         }
     }
 
     override fun close() {
+        refreshFuture?.cancel(false)
+        refreshFuture = null
+        trackedScopes.clear()
         natsListener?.close()
         natsListener = null
         grpcClient?.close()
@@ -57,10 +88,7 @@ internal class ConfigScopeSynchronizer(private val logger: Logger) : AutoCloseab
         val client = grpcClient ?: return
         scope.withRefreshLock {
             try {
-                val response = client.getSnapshotIfNewer(scope.app, scope.env, scope.version())
-                if (response.changed) {
-                    applySnapshot(scope, response.version, response.documentsList)
-                }
+                refreshScope(client, scope, forceFullSnapshot = false)
             } catch (error: Exception) {
                 logger.error(
                     "Config reload failed (app={}, env={}, reason=nats_refresh_failed)",
@@ -93,11 +121,15 @@ internal class ConfigScopeSynchronizer(private val logger: Logger) : AutoCloseab
                     .build()
             val response = client.syncDefaults(request)
             if (response.createdKeysList.isNotEmpty()) {
+                val createdKeys =
+                    response.createdKeysList.map { createdKey ->
+                        "${createdKey.namespace}/${createdKey.configKey}"
+                    }
                 logger.info(
                     "Config default synced (app={}, env={}, createdKeys={})",
                     scope.app,
                     scope.env,
-                    response.createdKeysList,
+                    createdKeys,
                 )
             }
         } catch (error: Exception) {
@@ -112,25 +144,51 @@ internal class ConfigScopeSynchronizer(private val logger: Logger) : AutoCloseab
         }
     }
 
-    private fun loadSnapshot(client: GrpcConfigClient, scope: AppEnvScope) {
-        try {
-            val response = client.getSnapshot(scope.app, scope.env)
+    private fun refreshTrackedScopes() {
+        val client = grpcClient ?: return
+        for (scope in trackedScopes) {
+            scope.withRefreshLock {
+                try {
+                    refreshScope(client, scope, forceFullSnapshot = false)
+                } catch (error: Exception) {
+                    logger.warn(
+                        "Config scope refresh failed (app={}, env={}, reason=periodic_refresh_failed)",
+                        scope.app,
+                        scope.env,
+                        error,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun refreshScope(
+        client: GrpcConfigClient,
+        scope: AppEnvScope,
+        forceFullSnapshot: Boolean,
+    ) {
+        val requiresFullSnapshot = forceFullSnapshot || scope.hasUninitializedBindings()
+        val response =
+            if (requiresFullSnapshot) {
+                client.getSnapshot(scope.app, scope.env)
+            } else {
+                client.getSnapshotIfNewer(scope.app, scope.env, scope.version())
+            }
+        if (response.changed) {
             applySnapshot(scope, response.version, response.documentsList)
-        } catch (error: Exception) {
-            logger.error(
-                "Config snapshot load failed (app={}, env={}, reason=initial_snapshot_failed)",
-                scope.app,
-                scope.env,
-                error,
-            )
         }
     }
 
     private fun applySnapshot(scope: AppEnvScope, version: Long, documents: List<ConfigDocument>) {
-        for (document in documents) {
-            val configKey = ConfigKey(document.namespace, document.configKey)
-            val binding = scope.binding(configKey) ?: continue
-            applyDocument(binding, document.contentJson)
+        val documentsByKey =
+            documents.associateBy { document -> ConfigKey(document.namespace, document.configKey) }
+        for ((configKey, binding) in scope.bindingsSnapshot()) {
+            val document = documentsByKey[configKey]
+            if (document != null) {
+                applyDocument(binding, document.contentJson)
+            } else {
+                binding.resetToDefault()
+            }
         }
         val previousVersion = scope.setVersion(version)
         logger.info(
@@ -158,5 +216,9 @@ internal class ConfigScopeSynchronizer(private val logger: Logger) : AutoCloseab
                 error,
             )
         }
+    }
+
+    companion object {
+        private const val REFRESH_INTERVAL_SECONDS = 15L
     }
 }

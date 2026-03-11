@@ -17,6 +17,7 @@ class ConfigPaperPlugin : JavaPlugin() {
         val grpcTarget = environmentConfig.grpcTarget()
         val natsUrl = environmentConfig.natsUrl()
         configManager.start(grpcTarget, natsUrl)
+        ConfigManagerProvider.register(configManager)
         server.servicesManager.register(
             ConfigManager::class.java,
             configManager,
@@ -28,6 +29,7 @@ class ConfigPaperPlugin : JavaPlugin() {
 
     override fun onDisable() {
         if (this::configManager.isInitialized) {
+            ConfigManagerProvider.unregister(configManager)
             configManager.close()
         }
     }

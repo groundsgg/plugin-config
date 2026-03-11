@@ -84,6 +84,9 @@ class ConfigManager(private val logger: Logger) : AutoCloseable {
         val binding =
             scopeRegistry.binding(definition)
                 ?: throw ConfigDefinitionNotRegisteredException(definition)
+        if (!binding.initialized()) {
+            throw ConfigDefinitionNotReadyException(definition)
+        }
         return binding.get()
     }
 

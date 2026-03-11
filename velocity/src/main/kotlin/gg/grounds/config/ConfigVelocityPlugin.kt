@@ -37,11 +37,13 @@ constructor(private val proxy: ProxyServer, private val logger: Logger) {
         val grpcTarget = environmentConfig.grpcTarget()
         val natsUrl = environmentConfig.natsUrl()
         configManager.start(grpcTarget, natsUrl)
+        ConfigManagerProvider.register(configManager)
         logger.info("Config plugin started (grpcTarget={}, natsUrl={})", grpcTarget, natsUrl)
     }
 
     @Subscribe
     fun onShutdown(event: ProxyShutdownEvent) {
+        ConfigManagerProvider.unregister(configManager)
         configManager.close()
     }
 
