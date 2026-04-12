@@ -12,17 +12,21 @@ import gg.grounds.grpc.config.SyncDefaultsResponse
 import io.grpc.ManagedChannel
 import java.util.concurrent.TimeUnit
 
-class GrpcConfigClient
+internal class GrpcConfigClient
 private constructor(
     channel: ManagedChannel,
     private val stub: ConfigServiceGrpc.ConfigServiceBlockingStub,
-) : BaseGrpcClient(channel) {
-    fun getSnapshot(app: String, env: String): GetSnapshotResponse {
+) : BaseGrpcClient(channel), ConfigSyncClient {
+    override fun getSnapshot(app: String, env: String): GetSnapshotResponse {
         val request = GetSnapshotRequest.newBuilder().setApp(app).setEnv(env).build()
         return stub.withDeadlineAfter(TIMEOUT_SECONDS, TimeUnit.SECONDS).getSnapshot(request)
     }
 
-    fun getSnapshotIfNewer(app: String, env: String, knownVersion: Long): GetSnapshotResponse {
+    override fun getSnapshotIfNewer(
+        app: String,
+        env: String,
+        knownVersion: Long,
+    ): GetSnapshotResponse {
         val request =
             GetSnapshotIfNewerRequest.newBuilder()
                 .setApp(app)
@@ -60,7 +64,7 @@ private constructor(
         return stub.withDeadlineAfter(TIMEOUT_SECONDS, TimeUnit.SECONDS).getDocument(request)
     }
 
-    fun syncDefaults(request: SyncDefaultsRequest): SyncDefaultsResponse {
+    override fun syncDefaults(request: SyncDefaultsRequest): SyncDefaultsResponse {
         return stub.withDeadlineAfter(SYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS).syncDefaults(request)
     }
 

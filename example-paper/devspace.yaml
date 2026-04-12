@@ -1,11 +1,11 @@
 version: v2beta1
-name: plugin-config-example
+name: plugin-config-example-paper
 
 deployments:
   app:
     namespace: games
     helm:
-      releaseName: plugin-config-example
+      releaseName: plugin-config-example-paper
       chart:
         name: oci://ghcr.io/groundsgg/charts/agones-fleet
         version: 0.1.0

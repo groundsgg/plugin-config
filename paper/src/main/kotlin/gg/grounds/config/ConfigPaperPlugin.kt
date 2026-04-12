@@ -16,7 +16,11 @@ class ConfigPaperPlugin : JavaPlugin() {
         registerProviders()
         val grpcTarget = environmentConfig.grpcTarget()
         val natsUrl = environmentConfig.natsUrl()
-        configManager.start(grpcTarget, natsUrl)
+        configManager.start(
+            grpcTarget,
+            natsUrl,
+            dataFolder.toPath().resolve("runtime-config-cache"),
+        )
         ConfigManagerProvider.register(configManager)
         server.servicesManager.register(
             ConfigManager::class.java,

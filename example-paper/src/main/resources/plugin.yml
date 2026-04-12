@@ -1,6 +1,6 @@
-name: plugin-config-example
+name: plugin-config-example-paper
 version: ${VERSION}
-description: Example plugin demonstrating the config system
+description: Example Paper plugin demonstrating the config system
 author: Grounds Development Team and contributors
 main: gg.grounds.config.example.ExamplePaperPlugin
 

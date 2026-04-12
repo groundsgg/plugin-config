@@ -5,12 +5,14 @@ import com.velocitypowered.api.event.Subscribe
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent
 import com.velocitypowered.api.plugin.Plugin
+import com.velocitypowered.api.plugin.annotation.DataDirectory
 import com.velocitypowered.api.proxy.ProxyServer
 import gg.grounds.BuildInfo
 import io.grpc.LoadBalancerRegistry
 import io.grpc.NameResolverRegistry
 import io.grpc.internal.DnsNameResolverProvider
 import io.grpc.internal.PickFirstLoadBalancerProvider
+import java.nio.file.Path
 import org.slf4j.Logger
 
 @Plugin(
@@ -23,7 +25,11 @@ import org.slf4j.Logger
 )
 class ConfigVelocityPlugin
 @Inject
-constructor(private val proxy: ProxyServer, private val logger: Logger) {
+constructor(
+    private val proxy: ProxyServer,
+    private val logger: Logger,
+    @param:DataDirectory private val dataDirectory: Path,
+) : VelocityConfigManagerService {
     private val configManager = ConfigManager(logger)
     private val environmentConfig = EnvironmentConfig()
 
@@ -36,9 +42,13 @@ constructor(private val proxy: ProxyServer, private val logger: Logger) {
         registerProviders()
         val grpcTarget = environmentConfig.grpcTarget()
         val natsUrl = environmentConfig.natsUrl()
-        configManager.start(grpcTarget, natsUrl)
+        configManager.start(grpcTarget, natsUrl, dataDirectory.resolve("runtime-config-cache"))
         ConfigManagerProvider.register(configManager)
-        logger.info("Config plugin started (grpcTarget={}, natsUrl={})", grpcTarget, natsUrl)
+        logger.info(
+            "Config plugin started successfully (grpcTarget={}, natsUrl={}, serviceResolver=plugin_manager)",
+            grpcTarget,
+            natsUrl,
+        )
     }
 
     @Subscribe
@@ -48,7 +58,7 @@ constructor(private val proxy: ProxyServer, private val logger: Logger) {
     }
 
     /** Returns the [ConfigManager] for other plugins to register and access configs. */
-    fun configManager(): ConfigManager = configManager
+    override fun configManager(): ConfigManager = configManager
 
     /**
      * Registers gRPC name resolver and load balancer providers so client channels can resolve DNS

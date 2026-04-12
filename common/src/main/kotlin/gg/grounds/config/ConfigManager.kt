@@ -2,6 +2,7 @@ package gg.grounds.config
 
 import gg.grounds.config.internal.scope.ConfigScopeRegistry
 import gg.grounds.config.internal.sync.ConfigScopeSynchronizer
+import java.nio.file.Path
 import java.util.function.Consumer
 import org.slf4j.Logger
 
@@ -22,37 +23,59 @@ class ConfigManager(private val logger: Logger) : AutoCloseable {
      * Starts the config manager by connecting to the gRPC backend and the NATS server. Must be
      * called before [register].
      */
-    fun start(grpcTarget: String, natsUrl: String) {
+    fun start(grpcTarget: String, natsUrl: String, cacheDirectory: Path? = null) {
         if (started) {
             logger.warn(
-                "Config manager start skipped (reason=already_started, grpcTarget={}, natsUrl={})",
+                "Config manager start skipped (reason=already_started, grpcTarget={}, natsUrl={}, cacheDirectory={})",
                 grpcTarget,
                 natsUrl,
+                cacheDirectory,
             )
             return
         }
-        scopeSynchronizer.start(grpcTarget, natsUrl)
+        scopeSynchronizer.start(grpcTarget, natsUrl, cacheDirectory)
         started = true
-        logger.info("Config manager started (grpcTarget={}, natsUrl={})", grpcTarget, natsUrl)
+        logger.info(
+            "Config manager started (grpcTarget={}, natsUrl={}, cacheDirectory={})",
+            grpcTarget,
+            natsUrl,
+            cacheDirectory,
+        )
     }
 
     /**
      * Registers a typed config definition for the given app and env.
      *
      * Each [ConfigDefinition] instance can only be registered once.
+     *
+     * `startupMode` controls how bootstrap failures are handled:
+     * - [ConfigStartupMode.FAIL_CLOSED] throws [ConfigRegistrationException] when default sync,
+     *   snapshot loading, or binding initialization cannot produce a ready value.
+     * - [ConfigStartupMode.DEGRADED] attempts to restore a persisted cached snapshot and returns
+     *   [ConfigRegistrationStatus.DEGRADED] when that succeeds.
+     *
+     * The returned [ConfigRegistrationResult] should be checked by callers that allow degraded
+     * startup so they can surface `DEGRADED` or `NOT_READY` explicitly during plugin startup.
      */
-    fun <T : Any> register(definition: ConfigDefinition<T>, app: String, env: String) {
+    fun <T : Any> register(
+        definition: ConfigDefinition<T>,
+        app: String,
+        env: String,
+        startupMode: ConfigStartupMode = ConfigStartupMode.FAIL_CLOSED,
+    ): ConfigRegistrationResult {
         check(started) { "ConfigManager must be started before registering definitions" }
 
         val scope = scopeRegistry.resolveScope(app, env)
         when (val result = scopeRegistry.register(definition, scope)) {
             is ConfigScopeRegistry.RegistrationResult.DefinitionAlreadyRegistered -> {
                 logger.warn(
-                    "Config definition registration skipped (reason=definition_already_registered, namespace={}, key={})",
+                    "Config definition registration skipped (reason=definition_already_registered, app={}, env={}, namespace={}, key={})",
+                    app,
+                    env,
                     definition.namespace,
                     definition.key,
                 )
-                return
+                return ConfigRegistrationResult.alreadyRegistered("definition_already_registered")
             }
             is ConfigScopeRegistry.RegistrationResult.ConfigKeyAlreadyRegistered -> {
                 logger.warn(
@@ -62,25 +85,33 @@ class ConfigManager(private val logger: Logger) : AutoCloseable {
                     result.configKey.namespace,
                     result.configKey.configKey,
                 )
-                return
+                return ConfigRegistrationResult.rejected("config_key_already_registered")
             }
             is ConfigScopeRegistry.RegistrationResult.Registered -> {
-                scopeSynchronizer.bootstrap(scope, result.binding)
+                val registrationResult =
+                    try {
+                        scopeSynchronizer.bootstrap(scope, result.binding, startupMode)
+                    } catch (error: Exception) {
+                        scopeRegistry.unregister(definition, scope, result.binding)
+                        throw error
+                    }
+                logger.info(
+                    "Config definition registered (app={}, env={}, namespace={}, key={}, type={}, status={}, reason={})",
+                    app,
+                    env,
+                    definition.namespace,
+                    definition.key,
+                    definition.type.simpleName,
+                    registrationResult.status,
+                    registrationResult.reason,
+                )
+                return registrationResult
             }
         }
-
-        logger.info(
-            "Config definition registered (app={}, env={}, namespace={}, key={}, type={})",
-            app,
-            env,
-            definition.namespace,
-            definition.key,
-            definition.type.simpleName,
-        )
     }
 
     /** Returns the current typed value for the given config definition. */
-    fun <T : Any> get(definition: ConfigDefinition<T>): T {
+    operator fun <T : Any> get(definition: ConfigDefinition<T>): T {
         val binding =
             scopeRegistry.binding(definition)
                 ?: throw ConfigDefinitionNotRegisteredException(definition)

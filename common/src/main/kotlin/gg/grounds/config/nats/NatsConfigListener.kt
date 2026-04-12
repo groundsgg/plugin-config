@@ -19,7 +19,7 @@ import org.slf4j.Logger
  * listens to `config.{app}.{env}.changed` and invokes the corresponding callback when a change
  * event arrives.
  */
-class NatsConfigListener(private val logger: Logger) : AutoCloseable {
+internal class NatsConfigListener(private val logger: Logger) : ConfigChangeListener {
     private val executor: ScheduledExecutorService =
         Executors.newSingleThreadScheduledExecutor { runnable ->
             Thread(runnable, "config-nats-listener").apply { isDaemon = true }
@@ -34,7 +34,7 @@ class NatsConfigListener(private val logger: Logger) : AutoCloseable {
     private var natsUrl: String = ""
 
     /** Connects to the NATS server. Must be called before [subscribe]. */
-    fun start(natsUrl: String) {
+    override fun start(natsUrl: String) {
         this.natsUrl = natsUrl
         closed.set(false)
         reconnectFuture?.cancel(false)
@@ -47,7 +47,7 @@ class NatsConfigListener(private val logger: Logger) : AutoCloseable {
      * callback is invoked when a change arrives on `config.{app}.{env}.changed`. Safe to call
      * multiple times for different app/env pairs.
      */
-    fun subscribe(app: String, env: String, onChangeReceived: () -> Unit) {
+    override fun subscribe(app: String, env: String, onChangeReceived: () -> Unit) {
         val key = AppEnvKey(app, env)
         val entry = SubscriptionEntry(app, env, onChangeReceived)
         val previousEntry = subscriptions.putIfAbsent(key, entry)

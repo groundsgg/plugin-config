@@ -45,6 +45,16 @@ internal class ConfigScopeRegistry {
         return scope.binding(configKey) as? ConfigBinding<T>
     }
 
+    fun <T : Any> unregister(
+        definition: ConfigDefinition<T>,
+        scope: AppEnvScope,
+        binding: ConfigBinding<T>,
+    ) {
+        val configKey = ConfigKey(definition.namespace, definition.key)
+        scope.removeBinding(configKey, binding)
+        definitionScopes.remove(definition, scope)
+    }
+
     fun clear() {
         scopes.clear()
         definitionScopes.clear()

@@ -1,23 +1,19 @@
 package gg.grounds.config
 
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.CopyOnWriteArrayList
 
 object ConfigManagerProvider {
-    private val currentManager = AtomicReference<ConfigManager?>(null)
+    private val registeredManagers = CopyOnWriteArrayList<ConfigManager>()
 
     fun register(configManager: ConfigManager) {
-        val previousManager = currentManager.get()
-        check(previousManager == null || previousManager === configManager) {
-            "Config manager provider registration failed (reason=manager_already_registered)"
-        }
-        currentManager.compareAndSet(null, configManager)
+        registeredManagers.addIfAbsent(configManager)
     }
 
     fun unregister(configManager: ConfigManager) {
-        currentManager.compareAndSet(configManager, null)
+        registeredManagers.remove(configManager)
     }
 
-    fun get(): ConfigManager? = currentManager.get()
+    fun get(): ConfigManager? = registeredManagers.lastOrNull()
 
     fun require(): ConfigManager {
         return get()

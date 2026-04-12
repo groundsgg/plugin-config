@@ -45,3 +45,6 @@ nb-configuration.xml
 
 # Ignore kotlin folder
 .kotlin
+
+# Codex
+.codex

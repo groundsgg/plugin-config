@@ -19,6 +19,10 @@ internal class AppEnvScope(val app: String, val env: String) {
 
     fun binding(key: ConfigKey): ConfigBinding<*>? = bindings[key]
 
+    fun removeBinding(key: ConfigKey, binding: ConfigBinding<*>): Boolean {
+        return bindings.remove(key, binding)
+    }
+
     fun bindingsSnapshot(): Map<ConfigKey, ConfigBinding<*>> = bindings.toMap()
 
     fun version(): Long = currentVersion.get()
