@@ -39,7 +39,7 @@ internal class ConfigScopeRegistry {
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun <T : Any> binding(definition: ConfigDefinition<T>): ConfigBinding<T>? {
+    operator fun <T : Any> get(definition: ConfigDefinition<T>): ConfigBinding<T>? {
         val scope = definitionScopes[definition] ?: return null
         val configKey = ConfigKey(definition.namespace, definition.key)
         return scope.binding(configKey) as? ConfigBinding<T>

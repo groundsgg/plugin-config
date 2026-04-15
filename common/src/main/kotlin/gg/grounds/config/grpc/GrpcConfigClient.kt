@@ -10,6 +10,9 @@ import gg.grounds.grpc.config.GetSnapshotResponse
 import gg.grounds.grpc.config.SyncDefaultsRequest
 import gg.grounds.grpc.config.SyncDefaultsResponse
 import io.grpc.ManagedChannel
+import io.grpc.Status
+import io.grpc.StatusException
+import io.grpc.StatusRuntimeException
 import java.util.concurrent.TimeUnit
 
 internal class GrpcConfigClient
@@ -53,7 +56,7 @@ private constructor(
         env: String,
         namespace: String,
         configKey: String,
-    ): GetDocumentResponse {
+    ): GetDocumentResponse? {
         val request =
             GetDocumentRequest.newBuilder()
                 .setApp(app)
@@ -61,7 +64,21 @@ private constructor(
                 .setNamespace(namespace)
                 .setConfigKey(configKey)
                 .build()
-        return stub.withDeadlineAfter(TIMEOUT_SECONDS, TimeUnit.SECONDS).getDocument(request)
+        return try {
+            stub.withDeadlineAfter(TIMEOUT_SECONDS, TimeUnit.SECONDS).getDocument(request)
+        } catch (error: StatusRuntimeException) {
+            if (error.status.code == Status.Code.NOT_FOUND) {
+                null
+            } else {
+                throw error
+            }
+        } catch (error: StatusException) {
+            if (error.status.code == Status.Code.NOT_FOUND) {
+                null
+            } else {
+                throw error
+            }
+        }
     }
 
     override fun syncDefaults(request: SyncDefaultsRequest): SyncDefaultsResponse {

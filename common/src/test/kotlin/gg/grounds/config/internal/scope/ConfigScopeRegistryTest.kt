@@ -27,7 +27,7 @@ class ConfigScopeRegistryTest {
             )
         assertEquals("plugin-config", duplicateKeyResult.configKey.namespace)
         assertEquals("message", duplicateKeyResult.configKey.configKey)
-        assertNotNull(registry.binding(TestConfig))
+        assertNotNull(registry[TestConfig])
     }
 
     private object TestConfig :

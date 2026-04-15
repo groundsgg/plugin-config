@@ -2,7 +2,6 @@ package gg.grounds.config.internal.binding
 
 import gg.grounds.config.ConfigDefinition
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Consumer
 import org.slf4j.LoggerFactory
@@ -10,11 +9,11 @@ import org.slf4j.LoggerFactory
 /** Internal holder for a single config binding, managing the current value and change callbacks. */
 internal class ConfigBinding<T : Any>(val definition: ConfigDefinition<T>) {
     private val logger = LoggerFactory.getLogger(ConfigBinding::class.java)
-    private val currentValue: AtomicReference<T> = AtomicReference(definition.defaultValue)
+    private val state =
+        AtomicReference(BindingState(value = definition.defaultValue, initialized = false))
     private val callbacks: CopyOnWriteArrayList<Consumer<T>> = CopyOnWriteArrayList()
-    private val initialized = AtomicBoolean(false)
 
-    fun get(): T = currentValue.get()
+    fun get(): T = state.get().value
 
     fun update(newValue: T) {
         setValue(newValue)
@@ -24,11 +23,11 @@ internal class ConfigBinding<T : Any>(val definition: ConfigDefinition<T>) {
         setValue(definition.defaultValue)
     }
 
-    fun initialized(): Boolean = initialized.get()
+    fun initialized(): Boolean = state.get().initialized
 
     private fun setValue(newValue: T) {
-        val oldValue = currentValue.getAndSet(newValue)
-        initialized.set(true)
+        val previousState = state.getAndSet(BindingState(value = newValue, initialized = true))
+        val oldValue = previousState.value
         if (oldValue == newValue) {
             return
         }
@@ -50,4 +49,6 @@ internal class ConfigBinding<T : Any>(val definition: ConfigDefinition<T>) {
     fun onChange(callback: Consumer<T>) {
         callbacks.add(callback)
     }
+
+    private data class BindingState<T : Any>(val value: T, val initialized: Boolean)
 }

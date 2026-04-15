@@ -2,6 +2,7 @@ package gg.grounds.config.nats
 
 import gg.grounds.config.AppEnvKey
 import io.nats.client.Connection
+import io.nats.client.ConnectionListener
 import io.nats.client.Dispatcher
 import io.nats.client.Nats
 import io.nats.client.Options
@@ -18,14 +19,24 @@ import org.slf4j.Logger
  * Manages a single NATS connection with dynamic per-app/env subscriptions. Each subscription
  * listens to `config.{app}.{env}.changed` and invokes the corresponding callback when a change
  * event arrives.
+ *
+ * These NATS events are best-effort refresh triggers only. Correctness still comes from the gRPC
+ * reconcile path via `GetSnapshotIfNewer`, because the publisher is not part of the server's
+ * transactional write path and consumers intentionally do not derive state from the event payload.
+ * See `docs/adr/0001-nats-refresh-triggers-are-best-effort.md`.
  */
-internal class NatsConfigListener(private val logger: Logger) : ConfigChangeListener {
+internal class NatsConfigListener(
+    private val logger: Logger,
+    private val connectionFactory: (Options) -> Connection = { options -> Nats.connect(options) },
     private val executor: ScheduledExecutorService =
         Executors.newSingleThreadScheduledExecutor { runnable ->
             Thread(runnable, "config-nats-listener").apply { isDaemon = true }
-        }
+        },
+    initialReconnectDelayMs: Long = MIN_RECONNECT_DELAY_MS,
+    private val maxReconnectDelayMs: Long = MAX_RECONNECT_DELAY_MS,
+) : ConfigChangeListener {
     private val closed = AtomicBoolean(false)
-    private val reconnectDelayMs = AtomicLong(MIN_RECONNECT_DELAY_MS)
+    private val reconnectDelayMs = AtomicLong(initialReconnectDelayMs)
     private val subscriptions = ConcurrentHashMap<AppEnvKey, SubscriptionEntry>()
     private val attachedSubscriptions = ConcurrentHashMap.newKeySet<AppEnvKey>()
     private var connection: Connection? = null
@@ -45,7 +56,8 @@ internal class NatsConfigListener(private val logger: Logger) : ConfigChangeList
     /**
      * Subscribes to config change events for the given app/env pair. The [onChangeReceived]
      * callback is invoked when a change arrives on `config.{app}.{env}.changed`. Safe to call
-     * multiple times for different app/env pairs.
+     * multiple times for different app/env pairs. The callback should reconcile through gRPC rather
+     * than treating the NATS event or payload as authoritative config state.
      */
     override fun subscribe(app: String, env: String, onChangeReceived: () -> Unit) {
         val key = AppEnvKey(app, env)
@@ -66,8 +78,9 @@ internal class NatsConfigListener(private val logger: Logger) : ConfigChangeList
             return
         }
         try {
-            val options = Options.Builder().server(natsUrl).build()
-            val conn = Nats.connect(options)
+            val options =
+                Options.Builder().server(natsUrl).connectionListener(::onConnectionEvent).build()
+            val conn = connectionFactory(options)
             connection = conn
             val disp = conn.createDispatcher()
             attachedSubscriptions.clear()
@@ -88,6 +101,36 @@ internal class NatsConfigListener(private val logger: Logger) : ConfigChangeList
                 error.message,
             )
             scheduleReconnect(error.message ?: "unknown")
+        }
+    }
+
+    private fun onConnectionEvent(connection: Connection, event: ConnectionListener.Events) {
+        if (connection !== this.connection) {
+            return
+        }
+        when (event) {
+            ConnectionListener.Events.CONNECTED -> {
+                logger.info("NATS config listener connected successfully (url={})", natsUrl)
+            }
+
+            ConnectionListener.Events.DISCONNECTED -> {
+                logger.warn("NATS config listener disconnected (url={})", natsUrl)
+            }
+
+            ConnectionListener.Events.RECONNECTED -> {
+                resetBackoff()
+                logger.info("NATS config listener reconnected successfully (url={})", natsUrl)
+            }
+
+            ConnectionListener.Events.CLOSED -> {
+                this.connection = null
+                dispatcher = null
+                attachedSubscriptions.clear()
+                logger.warn("NATS config listener closed (url={})", natsUrl)
+                scheduleReconnect("connection_closed")
+            }
+
+            else -> Unit
         }
     }
 
@@ -124,7 +167,7 @@ internal class NatsConfigListener(private val logger: Logger) : ConfigChangeList
         )
         reconnectFuture?.cancel(false)
         reconnectFuture = executor.schedule({ connect() }, delayMs, TimeUnit.MILLISECONDS)
-        val nextDelay = (delayMs * 2).coerceAtMost(MAX_RECONNECT_DELAY_MS)
+        val nextDelay = (delayMs * 2).coerceAtMost(maxReconnectDelayMs)
         reconnectDelayMs.set(nextDelay)
     }
 
@@ -134,11 +177,13 @@ internal class NatsConfigListener(private val logger: Logger) : ConfigChangeList
 
     private fun closeConnection() {
         try {
-            dispatcher?.let { connection?.closeDispatcher(it) }
+            val currentConnection = connection
+            val currentDispatcher = dispatcher
             dispatcher = null
-            connection?.close()
             connection = null
             attachedSubscriptions.clear()
+            currentDispatcher?.let { currentConnection?.closeDispatcher(it) }
+            currentConnection?.close()
         } catch (error: Exception) {
             logger.warn("Error closing NATS connection (error={})", error.message)
         }

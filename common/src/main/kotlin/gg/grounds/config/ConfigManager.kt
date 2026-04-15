@@ -13,9 +13,20 @@ import org.slf4j.Logger
  * Call [start] once to establish infrastructure connections (gRPC and NATS). Then call [register]
  * for each config definition, specifying which app and env it belongs to.
  */
-class ConfigManager(private val logger: Logger) : AutoCloseable {
-    private val scopeRegistry = ConfigScopeRegistry()
-    private val scopeSynchronizer = ConfigScopeSynchronizer(logger)
+class ConfigManager
+private constructor(
+    private val logger: Logger,
+    private val scopeRegistry: ConfigScopeRegistry,
+    private val scopeSynchronizer: ConfigScopeSynchronizer,
+) : AutoCloseable {
+    constructor(
+        logger: Logger
+    ) : this(logger, ConfigScopeRegistry(), ConfigScopeSynchronizer(logger))
+
+    internal constructor(
+        logger: Logger,
+        scopeSynchronizerFactory: (Logger) -> ConfigScopeSynchronizer,
+    ) : this(logger, ConfigScopeRegistry(), scopeSynchronizerFactory(logger))
 
     @Volatile private var started = false
 
@@ -113,8 +124,7 @@ class ConfigManager(private val logger: Logger) : AutoCloseable {
     /** Returns the current typed value for the given config definition. */
     operator fun <T : Any> get(definition: ConfigDefinition<T>): T {
         val binding =
-            scopeRegistry.binding(definition)
-                ?: throw ConfigDefinitionNotRegisteredException(definition)
+            scopeRegistry[definition] ?: throw ConfigDefinitionNotRegisteredException(definition)
         if (!binding.initialized()) {
             throw ConfigDefinitionNotReadyException(definition)
         }
@@ -124,8 +134,7 @@ class ConfigManager(private val logger: Logger) : AutoCloseable {
     /** Registers a callback that is invoked when the config value changes. */
     fun <T : Any> onChange(definition: ConfigDefinition<T>, callback: Consumer<T>) {
         val binding =
-            scopeRegistry.binding(definition)
-                ?: throw ConfigDefinitionNotRegisteredException(definition)
+            scopeRegistry[definition] ?: throw ConfigDefinitionNotRegisteredException(definition)
         binding.onChange(callback)
     }
 

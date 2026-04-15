@@ -1,7 +1,6 @@
 package gg.grounds.config
 
 import gg.grounds.config.grpc.ConfigSyncClient
-import gg.grounds.config.internal.scope.ConfigScopeRegistry
 import gg.grounds.config.internal.sync.ConfigScopeSynchronizer
 import gg.grounds.config.nats.ConfigChangeListener
 import gg.grounds.grpc.config.ConfigDocument
@@ -20,7 +19,6 @@ class ConfigManagerTest {
     @Test
     fun `register retries cleanly after fail closed bootstrap failure`() {
         val logger = LoggerFactory.getLogger("ConfigManagerTest")
-        val manager = ConfigManager(logger)
         val client = RetryableRecordingConfigSyncClient()
         val synchronizer =
             ConfigScopeSynchronizer(
@@ -29,12 +27,7 @@ class ConfigManagerTest {
                 natsListenerFactory = { NoopConfigChangeListener() },
                 sleepMillis = {},
             )
-        val scopeRegistryField = ConfigManager::class.java.getDeclaredField("scopeRegistry")
-        scopeRegistryField.isAccessible = true
-        scopeRegistryField.set(manager, ConfigScopeRegistry())
-        val synchronizerField = ConfigManager::class.java.getDeclaredField("scopeSynchronizer")
-        synchronizerField.isAccessible = true
-        synchronizerField.set(manager, synchronizer)
+        val manager = ConfigManager(logger, scopeSynchronizerFactory = { synchronizer })
 
         try {
             manager.start("dns:///config", "nats://localhost:4222")
