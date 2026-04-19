@@ -4,7 +4,6 @@ include("common", "velocity", "paper", "example-paper", "example-velocity")
 
 pluginManagement {
     repositories {
-        mavenLocal()
         maven {
             url = uri("https://maven.pkg.github.com/groundsgg/*")
             credentials {

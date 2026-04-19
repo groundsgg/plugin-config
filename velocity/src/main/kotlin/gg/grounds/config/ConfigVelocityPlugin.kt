@@ -17,7 +17,7 @@ import org.slf4j.Logger
 
 @Plugin(
     id = "plugin-config",
-    name = "Grounds Config Plugin",
+    name = "Grounds Plugin Config",
     version = BuildInfo.VERSION,
     description = "Runtime configuration management for Velocity",
     authors = ["Grounds Development Team and contributors"],

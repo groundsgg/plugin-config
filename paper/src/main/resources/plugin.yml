@@ -1,4 +1,4 @@
-name: plugin-config
+name: GroundsPluginConfig
 version: ${VERSION}
 description: Runtime configuration management for Paper
 author: Grounds Development Team and contributors

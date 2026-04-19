@@ -12,7 +12,7 @@ repositories {
 }
 
 dependencies {
-    protobuf("gg.grounds:library-grpc-contracts-config:0.1.0")
+    protobuf("gg.grounds:library-grpc-contracts-config:0.2.0")
     compileOnly("org.slf4j:slf4j-api:2.0.17")
     implementation("com.google.protobuf:protobuf-java:4.34.1")
     implementation("io.nats:jnats:2.25.2")

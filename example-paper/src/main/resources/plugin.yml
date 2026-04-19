@@ -1,4 +1,4 @@
-name: plugin-config-example-paper
+name: GroundsPluginConfigExamplePaper
 version: ${VERSION}
 description: Example Paper plugin demonstrating the config system
 author: Grounds Development Team and contributors
@@ -7,4 +7,4 @@ main: gg.grounds.config.example.ExamplePaperPlugin
 api-version: "1.21"
 
 depend:
-  - plugin-config
+  - GroundsPluginConfig

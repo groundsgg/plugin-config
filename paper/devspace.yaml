@@ -8,12 +8,13 @@ deployments:
       releaseName: plugin-config-paper
       chart:
         name: oci://ghcr.io/groundsgg/charts/agones-fleet
-        version: 0.1.0
+        version: 0.2.0
       values:
         image:
           repository: ghcr.io/groundsgg/paper
-          tag: 0.6.0
-        serverType: paper
+          tag: 0.4.2
+        serverPlatform: paper
+        serverRole: lobby
         command: ["/bin/sh", "-c", "sleep infinity"]
 
 dev:
@@ -31,7 +32,7 @@ dev:
       command: |
         # ENV needs to be exported in start command because we are not letting devspace replace the pod
         export CONFIG_GRPC_TARGET=dns:///service-config.api.svc.cluster.local:9000
-        export CONFIG_NATS_URL=nats://nats.nats.svc.cluster.local:4222
+        export CONFIG_NATS_URL=nats://nats.infra.svc.cluster.local:4222
         echo "Use ./start.sh to start the server"
         /bin/sh
     # Forward the following ports to be able to access your application via localhost
