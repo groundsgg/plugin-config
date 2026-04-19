@@ -1,0 +1,7 @@
+name: GroundsPluginConfig
+version: ${VERSION}
+description: Runtime configuration management for Paper
+author: Grounds Development Team and contributors
+main: gg.grounds.config.ConfigPaperPlugin
+
+api-version: "1.21"
