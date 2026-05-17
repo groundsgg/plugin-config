@@ -5,3 +5,5 @@ author: Grounds Development Team and contributors
 main: gg.grounds.config.ConfigPaperPlugin
 
 api-version: "1.21"
+depend:
+  - GroundsPluginRuntime
