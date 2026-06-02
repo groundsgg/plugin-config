@@ -6,6 +6,8 @@ import io.nats.client.ConnectionListener
 import io.nats.client.Dispatcher
 import io.nats.client.Nats
 import io.nats.client.Options
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -78,9 +80,16 @@ internal class NatsConfigListener(
             return
         }
         try {
-            val options =
-                Options.Builder().server(natsUrl).connectionListener(::onConnectionEvent).build()
-            val conn = connectionFactory(options)
+            val builder = Options.Builder().server(natsUrl).connectionListener(::onConnectionEvent)
+            // Present the projected SA-token (audience grounds-services) as the
+            // NATS bearer for the auth-callout broker. Re-read per (re)connect for
+            // kubelet rotation; skipped when absent (local/dev without the volume).
+            val tokenFile = System.getenv("GROUNDS_TOKEN_FILE") ?: "/var/run/secrets/grounds/token"
+            val tokenPath = Path.of(tokenFile)
+            if (Files.exists(tokenPath)) {
+                builder.tokenSupplier { Files.readString(tokenPath).trim().toCharArray() }
+            }
+            val conn = connectionFactory(builder.build())
             connection = conn
             val disp = conn.createDispatcher()
             attachedSubscriptions.clear()
