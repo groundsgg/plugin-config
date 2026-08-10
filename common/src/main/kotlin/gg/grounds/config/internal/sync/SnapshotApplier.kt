@@ -2,10 +2,10 @@ package gg.grounds.config.internal.sync
 
 import gg.grounds.config.ConfigKey
 import gg.grounds.config.ConfigSnapshot
+import gg.grounds.config.client.ConfigDocumentData
 import gg.grounds.config.internal.binding.ConfigBinding
 import gg.grounds.config.internal.cache.ConfigSnapshotCache
 import gg.grounds.config.internal.scope.AppEnvScope
-import gg.grounds.grpc.config.ConfigDocument
 import org.slf4j.Logger
 import tools.jackson.databind.ObjectMapper
 
@@ -14,7 +14,7 @@ internal class SnapshotApplier(
     private val objectMapper: ObjectMapper,
     private val snapshotCacheProvider: () -> ConfigSnapshotCache,
 ) {
-    fun applySnapshot(scope: AppEnvScope, version: Long, documents: List<ConfigDocument>) {
+    fun applySnapshot(scope: AppEnvScope, version: Long, documents: List<ConfigDocumentData>) {
         val currentVersion = scope.version()
         if (version < currentVersion) {
             logger.warn(
@@ -68,11 +68,11 @@ internal class SnapshotApplier(
     fun applyCachedSnapshot(scope: AppEnvScope, snapshot: ConfigSnapshot) {
         val documents =
             snapshot.documents.map { (configKey, contentJson) ->
-                ConfigDocument.newBuilder()
-                    .setNamespace(configKey.namespace)
-                    .setConfigKey(configKey.configKey)
-                    .setContentJson(contentJson)
-                    .build()
+                ConfigDocumentData(
+                    namespace = configKey.namespace,
+                    configKey = configKey.configKey,
+                    contentJson = contentJson,
+                )
             }
         applySnapshot(scope, snapshot.version, documents)
     }
@@ -95,7 +95,7 @@ internal class SnapshotApplier(
     }
 
     private fun buildCachedDocuments(
-        documentsByKey: Map<ConfigKey, ConfigDocument>
+        documentsByKey: Map<ConfigKey, ConfigDocumentData>
     ): Map<ConfigKey, String> = documentsByKey.mapValuesTo(linkedMapOf()) { it.value.contentJson }
 
     private fun handleMissingDocument(scope: AppEnvScope, binding: ConfigBinding<*>) {

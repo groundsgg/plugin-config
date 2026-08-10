@@ -6,8 +6,16 @@ package gg.grounds.config
  * registering config definitions.
  */
 class EnvironmentConfig {
-    fun grpcTarget(): String {
-        return requireEnv("CONFIG_GRPC_TARGET")
+    /**
+     * Where service-config answers. Both names on purpose: Argo does not order the plugin-jar fetch
+     * against the manifest roll, so a jar that only understood the new variable would fail to start
+     * on a pod still carrying the old one. `CONFIG_GRPC_TARGET` goes once every environment sets
+     * `CONFIG_SERVICE_URL`.
+     */
+    fun serviceUrl(): String {
+        return env("CONFIG_SERVICE_URL")
+            ?: env("CONFIG_GRPC_TARGET")
+            ?: error("Missing required environment variable CONFIG_SERVICE_URL")
     }
 
     fun natsUrl(): String {

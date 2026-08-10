@@ -8,10 +8,6 @@ import com.velocitypowered.api.plugin.Plugin
 import com.velocitypowered.api.plugin.annotation.DataDirectory
 import com.velocitypowered.api.proxy.ProxyServer
 import gg.grounds.BuildInfo
-import io.grpc.LoadBalancerRegistry
-import io.grpc.NameResolverRegistry
-import io.grpc.internal.DnsNameResolverProvider
-import io.grpc.internal.PickFirstLoadBalancerProvider
 import java.nio.file.Path
 import org.slf4j.Logger
 
@@ -39,14 +35,13 @@ constructor(
 
     @Subscribe
     fun onInitialize(event: ProxyInitializeEvent) {
-        registerProviders()
-        val grpcTarget = environmentConfig.grpcTarget()
+        val serviceUrl = environmentConfig.serviceUrl()
         val natsUrl = environmentConfig.natsUrl()
-        configManager.start(grpcTarget, natsUrl, dataDirectory.resolve("runtime-config-cache"))
+        configManager.start(serviceUrl, natsUrl, dataDirectory.resolve("runtime-config-cache"))
         ConfigManagerProvider.register(configManager)
         logger.info(
-            "Config plugin started successfully (grpcTarget={}, natsUrl={}, serviceResolver=plugin_manager)",
-            grpcTarget,
+            "Config plugin started successfully (serviceUrl={}, natsUrl={}, serviceResolver=plugin_manager)",
+            serviceUrl,
             natsUrl,
         )
     }
@@ -59,13 +54,4 @@ constructor(
 
     /** Returns the [ConfigManager] for other plugins to register and access configs. */
     override fun configManager(): ConfigManager = configManager
-
-    /**
-     * Registers gRPC name resolver and load balancer providers so client channels can resolve DNS
-     * targets and select endpoints when running inside Velocity's shaded environment.
-     */
-    private fun registerProviders() {
-        NameResolverRegistry.getDefaultRegistry().register(DnsNameResolverProvider())
-        LoadBalancerRegistry.getDefaultRegistry().register(PickFirstLoadBalancerProvider())
-    }
 }

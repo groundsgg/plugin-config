@@ -34,21 +34,21 @@ private constructor(
      * Starts the config manager by connecting to the gRPC backend and the NATS server. Must be
      * called before [register].
      */
-    fun start(grpcTarget: String, natsUrl: String, cacheDirectory: Path? = null) {
+    fun start(serviceUrl: String, natsUrl: String, cacheDirectory: Path? = null) {
         if (started) {
             logger.warn(
-                "Config manager start skipped (reason=already_started, grpcTarget={}, natsUrl={}, cacheDirectory={})",
-                grpcTarget,
+                "Config manager start skipped (reason=already_started, serviceUrl={}, natsUrl={}, cacheDirectory={})",
+                serviceUrl,
                 natsUrl,
                 cacheDirectory,
             )
             return
         }
-        scopeSynchronizer.start(grpcTarget, natsUrl, cacheDirectory)
+        scopeSynchronizer.start(serviceUrl, natsUrl, cacheDirectory)
         started = true
         logger.info(
-            "Config manager started (grpcTarget={}, natsUrl={}, cacheDirectory={})",
-            grpcTarget,
+            "Config manager started (serviceUrl={}, natsUrl={}, cacheDirectory={})",
+            serviceUrl,
             natsUrl,
             cacheDirectory,
         )

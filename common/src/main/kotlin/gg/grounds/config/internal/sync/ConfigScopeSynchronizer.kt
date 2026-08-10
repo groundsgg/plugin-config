@@ -2,8 +2,8 @@ package gg.grounds.config.internal.sync
 
 import gg.grounds.config.ConfigRegistrationResult
 import gg.grounds.config.ConfigStartupMode
-import gg.grounds.config.grpc.ConfigSyncClient
-import gg.grounds.config.grpc.GrpcConfigClient
+import gg.grounds.config.client.ConfigSyncClient
+import gg.grounds.config.client.HttpConfigClient
 import gg.grounds.config.internal.binding.ConfigBinding
 import gg.grounds.config.internal.cache.ConfigSnapshotCache
 import gg.grounds.config.internal.scope.AppEnvScope
@@ -25,8 +25,8 @@ import tools.jackson.module.kotlin.jacksonMapperBuilder
 /** Internal coordinator for syncing defaults and applying snapshots to scope bindings. */
 internal class ConfigScopeSynchronizer(
     private val logger: Logger,
-    private val grpcClientFactory: (String) -> ConfigSyncClient = { target ->
-        GrpcConfigClient.create(target)
+    private val configClientFactory: (String) -> ConfigSyncClient = { target ->
+        HttpConfigClient.create(target)
     },
     private val natsListenerFactory: (Logger) -> ConfigChangeListener = { syncLogger ->
         NatsConfigListener(syncLogger)
@@ -62,7 +62,7 @@ internal class ConfigScopeSynchronizer(
             refreshExecutorFactory = refreshExecutorFactory,
             refreshWorkerExecutorFactory = refreshWorkerExecutorFactory,
             sleepMillis = sleepMillis,
-            clientProvider = { grpcClient },
+            clientProvider = { configClient },
             withLifecycleReadLock = { block -> lifecycleLock.read { block() } },
         )
     private val bootstrapCoordinator =
@@ -74,17 +74,17 @@ internal class ConfigScopeSynchronizer(
             sleepMillis = sleepMillis,
             snapshotCacheLoader = { app, env -> snapshotCache.load(app, env) },
         )
-    private var grpcClient: ConfigSyncClient? = null
+    private var configClient: ConfigSyncClient? = null
     private var natsListener: ConfigChangeListener? = null
     private var snapshotCache: ConfigSnapshotCache = ConfigSnapshotCache.noop()
 
-    fun start(grpcTarget: String, natsUrl: String, cacheDirectory: Path? = null) {
+    fun start(serviceUrl: String, natsUrl: String, cacheDirectory: Path? = null) {
         lifecycleLock.write {
             stopRuntime()
-            val client = grpcClientFactory(grpcTarget)
+            val client = configClientFactory(serviceUrl)
             val listener = natsListenerFactory(logger)
             listener.start(natsUrl)
-            grpcClient = client
+            configClient = client
             natsListener = listener
             snapshotCache = ConfigSnapshotCache.create(logger, cacheDirectory)
             refreshScheduler.start()
@@ -98,7 +98,7 @@ internal class ConfigScopeSynchronizer(
     ): ConfigRegistrationResult =
         lifecycleLock.read {
             val client =
-                checkNotNull(grpcClient) {
+                checkNotNull(configClient) {
                     "Config scope bootstrap failed (reason=grpc_client_not_started)"
                 }
             val listener =
@@ -119,8 +119,8 @@ internal class ConfigScopeSynchronizer(
         refreshScheduler.stopRuntime()
         natsListener?.close()
         natsListener = null
-        grpcClient?.close()
-        grpcClient = null
+        configClient?.close()
+        configClient = null
         snapshotCache = ConfigSnapshotCache.noop()
     }
 

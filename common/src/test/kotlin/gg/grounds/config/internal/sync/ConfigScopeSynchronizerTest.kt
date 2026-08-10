@@ -6,16 +6,15 @@ import gg.grounds.config.ConfigRegistrationException
 import gg.grounds.config.ConfigRegistrationResult
 import gg.grounds.config.ConfigRegistrationStatus
 import gg.grounds.config.ConfigStartupMode
-import gg.grounds.config.grpc.ConfigSyncClient
+import gg.grounds.config.client.ConfigDefaultData
+import gg.grounds.config.client.ConfigDocumentData
+import gg.grounds.config.client.ConfigServiceException
+import gg.grounds.config.client.ConfigSyncClient
+import gg.grounds.config.client.SnapshotResult
+import gg.grounds.config.client.SyncDefaultsResult
 import gg.grounds.config.internal.binding.ConfigBinding
 import gg.grounds.config.internal.scope.AppEnvScope
 import gg.grounds.config.nats.ConfigChangeListener
-import gg.grounds.grpc.config.ConfigDocument
-import gg.grounds.grpc.config.GetSnapshotResponse
-import gg.grounds.grpc.config.SyncDefaultsRequest
-import gg.grounds.grpc.config.SyncDefaultsResponse
-import io.grpc.Status
-import io.grpc.StatusRuntimeException
 import java.util.Collections
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -52,7 +51,7 @@ class ConfigScopeSynchronizerTest {
         val synchronizer =
             ConfigScopeSynchronizer(
                 logger = LoggerFactory.getLogger("ConfigScopeSynchronizerLifecycleLockTest"),
-                grpcClientFactory = { client },
+                configClientFactory = { client },
                 natsListenerFactory = { RecordingConfigChangeListener() },
                 refreshExecutorFactory = {
                     Executors.newSingleThreadScheduledExecutor().also { executor ->
@@ -113,7 +112,7 @@ class ConfigScopeSynchronizerTest {
                     }
                     try {
                         Thread.sleep(200)
-                        GetSnapshotResponse.getDefaultInstance()
+                        SnapshotResult(changed = false, version = 0, documents = emptyList())
                     } finally {
                         activeRefreshes.decrementAndGet()
                         refreshCompleted.countDown()
@@ -125,7 +124,7 @@ class ConfigScopeSynchronizerTest {
         val synchronizer =
             ConfigScopeSynchronizer(
                 logger = LoggerFactory.getLogger("ConfigScopeSynchronizerParallelRefreshTest"),
-                grpcClientFactory = { client },
+                configClientFactory = { client },
                 natsListenerFactory = { RecordingConfigChangeListener() },
                 refreshExecutorFactory = {
                     Executors.newSingleThreadScheduledExecutor().also { executor ->
@@ -194,7 +193,7 @@ class ConfigScopeSynchronizerTest {
         val synchronizer =
             ConfigScopeSynchronizer(
                 logger = LoggerFactory.getLogger("ConfigScopeSynchronizerTest"),
-                grpcClientFactory = { client },
+                configClientFactory = { client },
                 natsListenerFactory = { listener },
                 refreshExecutorFactory = {
                     Executors.newSingleThreadScheduledExecutor().also { executor ->
@@ -233,17 +232,13 @@ class ConfigScopeSynchronizerTest {
             RecordingConfigSyncClient(
                 syncDefaultsHandler = {
                     if (syncDefaultCalls < 3) {
-                        throw StatusRuntimeException(
-                            Status.UNAVAILABLE.withDescription("sync unavailable")
-                        )
+                        throw ConfigServiceException("sync unavailable", 503)
                     }
-                    SyncDefaultsResponse.getDefaultInstance()
+                    SyncDefaultsResult(version = 0, createdKeys = emptyList())
                 },
                 getSnapshotHandler = {
                     if (snapshotCalls < 3) {
-                        throw StatusRuntimeException(
-                            Status.UNAVAILABLE.withDescription("snapshot unavailable")
-                        )
+                        throw ConfigServiceException("snapshot unavailable", 503)
                     }
                     defaultSnapshotResponse(version = 7, value = "ready")
                 },
@@ -253,7 +248,7 @@ class ConfigScopeSynchronizerTest {
         val synchronizer =
             ConfigScopeSynchronizer(
                 logger = LoggerFactory.getLogger("ConfigScopeSynchronizerRetryTest"),
-                grpcClientFactory = { client },
+                configClientFactory = { client },
                 natsListenerFactory = { listener },
                 refreshExecutorFactory = {
                     Executors.newSingleThreadScheduledExecutor().also { executor ->
@@ -289,18 +284,14 @@ class ConfigScopeSynchronizerTest {
     fun `bootstrap fails closed when initial snapshot load fails`() {
         val client =
             RecordingConfigSyncClient(
-                getSnapshotHandler = {
-                    throw StatusRuntimeException(
-                        Status.UNAVAILABLE.withDescription("snapshot unavailable")
-                    )
-                }
+                getSnapshotHandler = { throw ConfigServiceException("snapshot unavailable", 503) }
             )
         val listener = RecordingConfigChangeListener()
         val executors = mutableListOf<ScheduledExecutorService>()
         val synchronizer =
             ConfigScopeSynchronizer(
                 logger = LoggerFactory.getLogger("ConfigScopeSynchronizerFailClosedTest"),
-                grpcClientFactory = { client },
+                configClientFactory = { client },
                 natsListenerFactory = { listener },
                 refreshExecutorFactory = {
                     Executors.newSingleThreadScheduledExecutor().also { executor ->
@@ -336,7 +327,7 @@ class ConfigScopeSynchronizerTest {
             val warmupSynchronizer =
                 ConfigScopeSynchronizer(
                     logger = LoggerFactory.getLogger("ConfigScopeSynchronizerWarmupTest"),
-                    grpcClientFactory = {
+                    configClientFactory = {
                         RecordingConfigSyncClient(
                             getSnapshotHandler = {
                                 defaultSnapshotResponse(version = 11, value = "cached")
@@ -363,12 +354,10 @@ class ConfigScopeSynchronizerTest {
             val degradedSynchronizer =
                 ConfigScopeSynchronizer(
                     logger = LoggerFactory.getLogger("ConfigScopeSynchronizerDegradedCacheTest"),
-                    grpcClientFactory = {
+                    configClientFactory = {
                         RecordingConfigSyncClient(
                             syncDefaultsHandler = {
-                                throw StatusRuntimeException(
-                                    Status.UNAVAILABLE.withDescription("sync unavailable")
-                                )
+                                throw ConfigServiceException("sync unavailable", 503)
                             }
                         )
                     },
@@ -413,18 +402,14 @@ class ConfigScopeSynchronizerTest {
         val cacheDirectory = createTempDirectory("config-scope-empty-cache")
         val client =
             RecordingConfigSyncClient(
-                syncDefaultsHandler = {
-                    throw StatusRuntimeException(
-                        Status.UNAVAILABLE.withDescription("sync unavailable")
-                    )
-                }
+                syncDefaultsHandler = { throw ConfigServiceException("sync unavailable", 503) }
             )
         val listener = RecordingConfigChangeListener()
         val executors = mutableListOf<ScheduledExecutorService>()
         val synchronizer =
             ConfigScopeSynchronizer(
                 logger = LoggerFactory.getLogger("ConfigScopeSynchronizerNotReadyTest"),
-                grpcClientFactory = { client },
+                configClientFactory = { client },
                 natsListenerFactory = { listener },
                 refreshExecutorFactory = {
                     Executors.newSingleThreadScheduledExecutor().also { executor ->
@@ -459,7 +444,7 @@ class ConfigScopeSynchronizerTest {
         val client =
             RecordingConfigSyncClient(
                 getSnapshotHandler = {
-                    GetSnapshotResponse.newBuilder().setChanged(true).setVersion(3).build()
+                    SnapshotResult(changed = true, version = 3, documents = emptyList())
                 }
             )
         val listener = RecordingConfigChangeListener()
@@ -467,7 +452,7 @@ class ConfigScopeSynchronizerTest {
         val synchronizer =
             ConfigScopeSynchronizer(
                 logger = LoggerFactory.getLogger("ConfigScopeSynchronizerMissingBootstrapTest"),
-                grpcClientFactory = { client },
+                configClientFactory = { client },
                 natsListenerFactory = { listener },
                 refreshExecutorFactory = {
                     Executors.newSingleThreadScheduledExecutor().also { executor ->
@@ -502,7 +487,7 @@ class ConfigScopeSynchronizerTest {
             RecordingConfigSyncClient(
                 getSnapshotHandler = { defaultSnapshotResponse(version = 1, value = "initial") },
                 getSnapshotIfNewerHandler = { _, _, _ ->
-                    GetSnapshotResponse.newBuilder().setChanged(true).setVersion(2).build()
+                    SnapshotResult(changed = true, version = 2, documents = emptyList())
                 },
             )
         var onChangeReceived: (() -> Unit)? = null
@@ -511,7 +496,7 @@ class ConfigScopeSynchronizerTest {
         val synchronizer =
             ConfigScopeSynchronizer(
                 logger = LoggerFactory.getLogger("ConfigScopeSynchronizerMissingRefreshTest"),
-                grpcClientFactory = { client },
+                configClientFactory = { client },
                 natsListenerFactory = { listener },
                 refreshExecutorFactory = {
                     Executors.newSingleThreadScheduledExecutor().also { executor ->
@@ -555,7 +540,7 @@ class ConfigScopeSynchronizerTest {
         val synchronizer =
             ConfigScopeSynchronizer(
                 logger = LoggerFactory.getLogger("ConfigScopeSynchronizerStaleSnapshotTest"),
-                grpcClientFactory = { client },
+                configClientFactory = { client },
                 natsListenerFactory = { listener },
                 refreshExecutorFactory = {
                     Executors.newSingleThreadScheduledExecutor().also { executor ->
@@ -594,16 +579,13 @@ class ConfigScopeSynchronizerTest {
             val warmupSynchronizer =
                 ConfigScopeSynchronizer(
                     logger = LoggerFactory.getLogger("ConfigScopeSynchronizerRetainedCacheWarmup"),
-                    grpcClientFactory = {
+                    configClientFactory = {
                         RecordingConfigSyncClient(
                             getSnapshotHandler = {
                                 defaultSnapshotResponse(version = 1, value = "initial")
                             },
                             getSnapshotIfNewerHandler = { _, _, _ ->
-                                GetSnapshotResponse.newBuilder()
-                                    .setChanged(true)
-                                    .setVersion(2)
-                                    .build()
+                                SnapshotResult(changed = true, version = 2, documents = emptyList())
                             },
                         )
                     },
@@ -636,12 +618,10 @@ class ConfigScopeSynchronizerTest {
                 ConfigScopeSynchronizer(
                     logger =
                         LoggerFactory.getLogger("ConfigScopeSynchronizerRetainedCacheDegraded"),
-                    grpcClientFactory = {
+                    configClientFactory = {
                         RecordingConfigSyncClient(
                             syncDefaultsHandler = {
-                                throw StatusRuntimeException(
-                                    Status.UNAVAILABLE.withDescription("sync unavailable")
-                                )
+                                throw ConfigServiceException("sync unavailable", 503)
                             }
                         )
                     },
@@ -691,23 +671,24 @@ class ConfigScopeSynchronizerTest {
             val warmupSynchronizer =
                 ConfigScopeSynchronizer(
                     logger = LoggerFactory.getLogger("ConfigScopeSynchronizerMalformedCacheWarmup"),
-                    grpcClientFactory = {
+                    configClientFactory = {
                         RecordingConfigSyncClient(
                             getSnapshotHandler = {
                                 defaultSnapshotResponse(version = 1, value = "initial")
                             },
                             getSnapshotIfNewerHandler = { _, _, _ ->
-                                GetSnapshotResponse.newBuilder()
-                                    .setChanged(true)
-                                    .setVersion(2)
-                                    .addDocuments(
-                                        ConfigDocument.newBuilder()
-                                            .setNamespace(TestStringConfig.namespace)
-                                            .setConfigKey(TestStringConfig.key)
-                                            .setContentJson("{")
-                                            .build()
-                                    )
-                                    .build()
+                                SnapshotResult(
+                                    changed = true,
+                                    version = 2,
+                                    documents =
+                                        listOf(
+                                            ConfigDocumentData(
+                                                namespace = TestStringConfig.namespace,
+                                                configKey = TestStringConfig.key,
+                                                contentJson = "{",
+                                            )
+                                        ),
+                                )
                             },
                         )
                     },
@@ -740,12 +721,10 @@ class ConfigScopeSynchronizerTest {
                 ConfigScopeSynchronizer(
                     logger =
                         LoggerFactory.getLogger("ConfigScopeSynchronizerMalformedCacheDegraded"),
-                    grpcClientFactory = {
+                    configClientFactory = {
                         RecordingConfigSyncClient(
                             syncDefaultsHandler = {
-                                throw StatusRuntimeException(
-                                    Status.UNAVAILABLE.withDescription("sync unavailable")
-                                )
+                                throw ConfigServiceException("sync unavailable", 503)
                             }
                         )
                     },
@@ -795,16 +774,16 @@ class ConfigScopeSynchronizerTest {
 
     private class RecordingConfigSyncClient(
         private val operations: MutableList<String> = mutableListOf(),
-        private val syncDefaultsHandler: RecordingConfigSyncClient.() -> SyncDefaultsResponse = {
-            SyncDefaultsResponse.getDefaultInstance()
+        private val syncDefaultsHandler: RecordingConfigSyncClient.() -> SyncDefaultsResult = {
+            SyncDefaultsResult(version = 0, createdKeys = emptyList())
         },
-        private val getSnapshotHandler: RecordingConfigSyncClient.() -> GetSnapshotResponse = {
+        private val getSnapshotHandler: RecordingConfigSyncClient.() -> SnapshotResult = {
             defaultSnapshotResponse(version = 1, value = "default")
         },
         private val getSnapshotIfNewerHandler:
-            RecordingConfigSyncClient.(String, String, Long) -> GetSnapshotResponse =
+            RecordingConfigSyncClient.(String, String, Long) -> SnapshotResult =
             { _, _, _ ->
-                GetSnapshotResponse.getDefaultInstance()
+                SnapshotResult(changed = false, version = 0, documents = emptyList())
             },
     ) : ConfigSyncClient {
         var syncDefaultCalls = 0
@@ -816,7 +795,7 @@ class ConfigScopeSynchronizerTest {
         var getSnapshotIfNewerCalls = 0
             private set
 
-        override fun getSnapshot(app: String, env: String): GetSnapshotResponse {
+        override fun getSnapshot(app: String, env: String): SnapshotResult {
             operations += "getSnapshot"
             snapshotCalls += 1
             return getSnapshotHandler()
@@ -826,13 +805,17 @@ class ConfigScopeSynchronizerTest {
             app: String,
             env: String,
             knownVersion: Long,
-        ): GetSnapshotResponse {
+        ): SnapshotResult {
             operations += "getSnapshotIfNewer"
             getSnapshotIfNewerCalls += 1
             return getSnapshotIfNewerHandler(app, env, knownVersion)
         }
 
-        override fun syncDefaults(request: SyncDefaultsRequest): SyncDefaultsResponse {
+        override fun syncDefaults(
+            app: String,
+            env: String,
+            defaults: List<ConfigDefaultData>,
+        ): SyncDefaultsResult {
             operations += "syncDefaults"
             syncDefaultCalls += 1
             return syncDefaultsHandler()
@@ -863,18 +846,19 @@ class ConfigScopeSynchronizerTest {
             method.invoke(synchronizer)
         }
 
-        fun defaultSnapshotResponse(version: Long, value: String): GetSnapshotResponse {
-            return GetSnapshotResponse.newBuilder()
-                .setChanged(true)
-                .setVersion(version)
-                .addDocuments(
-                    ConfigDocument.newBuilder()
-                        .setNamespace(TestStringConfig.namespace)
-                        .setConfigKey(TestStringConfig.key)
-                        .setContentJson("\"$value\"")
-                        .build()
-                )
-                .build()
+        fun defaultSnapshotResponse(version: Long, value: String): SnapshotResult {
+            return SnapshotResult(
+                changed = true,
+                version = version,
+                documents =
+                    listOf(
+                        ConfigDocumentData(
+                            namespace = TestStringConfig.namespace,
+                            configKey = TestStringConfig.key,
+                            contentJson = "\"$value\"",
+                        )
+                    ),
+            )
         }
     }
 }
