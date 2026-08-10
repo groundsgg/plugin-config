@@ -1,14 +1,14 @@
 package gg.grounds.config
 
-import gg.grounds.config.grpc.ConfigSyncClient
+import gg.grounds.config.client.ConfigDefaultData
+import gg.grounds.config.client.ConfigDocumentData
+import gg.grounds.config.client.ConfigKeyData
+import gg.grounds.config.client.ConfigServiceException
+import gg.grounds.config.client.ConfigSyncClient
+import gg.grounds.config.client.SnapshotResult
+import gg.grounds.config.client.SyncDefaultsResult
 import gg.grounds.config.internal.sync.ConfigScopeSynchronizer
 import gg.grounds.config.nats.ConfigChangeListener
-import gg.grounds.grpc.config.ConfigDocument
-import gg.grounds.grpc.config.GetSnapshotResponse
-import gg.grounds.grpc.config.SyncDefaultsRequest
-import gg.grounds.grpc.config.SyncDefaultsResponse
-import io.grpc.Status
-import io.grpc.StatusRuntimeException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -23,7 +23,7 @@ class ConfigManagerTest {
         val synchronizer =
             ConfigScopeSynchronizer(
                 logger = logger,
-                grpcClientFactory = { client },
+                configClientFactory = { client },
                 natsListenerFactory = { NoopConfigChangeListener() },
                 sleepMillis = {},
             )
@@ -66,42 +66,40 @@ class ConfigManagerTest {
         var getSnapshotCalls = 0
             private set
 
-        override fun getSnapshot(app: String, env: String): GetSnapshotResponse {
+        override fun getSnapshot(app: String, env: String): SnapshotResult {
             getSnapshotCalls += 1
             if (getSnapshotCalls <= 3) {
-                throw StatusRuntimeException(
-                    Status.UNAVAILABLE.withDescription("snapshot unavailable")
-                )
+                // A 503 is retryable: the answer may be different a moment later.
+                throw ConfigServiceException("snapshot unavailable", 503)
             }
-            return GetSnapshotResponse.newBuilder()
-                .setChanged(true)
-                .setVersion(7)
-                .addDocuments(
-                    ConfigDocument.newBuilder()
-                        .setNamespace(TestStringConfig.namespace)
-                        .setConfigKey(TestStringConfig.key)
-                        .setContentJson("\"ready\"")
-                        .build()
-                )
-                .build()
+            return SnapshotResult(
+                changed = true,
+                version = 7,
+                documents =
+                    listOf(
+                        ConfigDocumentData(
+                            namespace = TestStringConfig.namespace,
+                            configKey = TestStringConfig.key,
+                            contentJson = "\"ready\"",
+                        )
+                    ),
+            )
         }
 
         override fun getSnapshotIfNewer(
             app: String,
             env: String,
             knownVersion: Long,
-        ): GetSnapshotResponse = GetSnapshotResponse.getDefaultInstance()
+        ): SnapshotResult = SnapshotResult(changed = false, version = 0, documents = emptyList())
 
-        override fun syncDefaults(request: SyncDefaultsRequest): SyncDefaultsResponse {
+        override fun syncDefaults(
+            app: String,
+            env: String,
+            defaults: List<ConfigDefaultData>,
+        ): SyncDefaultsResult {
             syncDefaultsCalls += 1
-            val createdKeys =
-                request.defaultsList.map { defaultConfig ->
-                    gg.grounds.grpc.config.ConfigDocumentKey.newBuilder()
-                        .setNamespace(defaultConfig.namespace)
-                        .setConfigKey(defaultConfig.configKey)
-                        .build()
-                }
-            return SyncDefaultsResponse.newBuilder().addAllCreatedKeys(createdKeys).build()
+            val createdKeys = defaults.map { ConfigKeyData(it.namespace, it.configKey) }
+            return SyncDefaultsResult(version = 0, createdKeys = createdKeys)
         }
 
         override fun close() {}

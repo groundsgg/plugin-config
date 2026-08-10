@@ -1,8 +1,8 @@
 package gg.grounds.config.internal.sync
 
+import gg.grounds.config.client.SnapshotResult
 import gg.grounds.config.internal.scope.AppEnvScope
 import gg.grounds.config.nats.ConfigChangeListener
-import gg.grounds.grpc.config.GetSnapshotResponse
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.ScheduledExecutorService
@@ -16,7 +16,7 @@ internal class RefreshScheduler(
     private val refreshExecutorFactory: () -> ScheduledExecutorService,
     private val refreshWorkerExecutorFactory: () -> ExecutorService,
     private val sleepMillis: (Long) -> Unit,
-    private val clientProvider: () -> gg.grounds.config.grpc.ConfigSyncClient?,
+    private val clientProvider: () -> gg.grounds.config.client.ConfigSyncClient?,
     private val withLifecycleReadLock: ((() -> Unit) -> Unit),
 ) {
     private val trackedScopes = ConcurrentHashMap.newKeySet<AppEnvScope>()
@@ -86,24 +86,24 @@ internal class RefreshScheduler(
     }
 
     fun refreshScope(
-        client: gg.grounds.config.grpc.ConfigSyncClient,
+        client: gg.grounds.config.client.ConfigSyncClient,
         scope: AppEnvScope,
         forceFullSnapshot: Boolean,
     ) {
         val requiresFullSnapshot = forceFullSnapshot || scope.hasUninitializedBindings()
         val response =
             if (requiresFullSnapshot) {
-                executeRetryableGrpcCall(
+                executeRetryableCall(
                     logger = logger,
                     scope = scope,
                     operation = "get_snapshot",
-                    maxAttempts = BOOTSTRAP_GRPC_MAX_ATTEMPTS,
+                    maxAttempts = REFRESH_MAX_ATTEMPTS,
                     sleepMillis = sleepMillis,
                 ) {
                     client.getSnapshot(scope.app, scope.env)
                 }
             } else {
-                executeRetryableGrpcCall(
+                executeRetryableCall(
                     logger = logger,
                     scope = scope,
                     operation = "get_snapshot_if_newer",
@@ -116,9 +116,9 @@ internal class RefreshScheduler(
         applyResponse(scope, response)
     }
 
-    private fun applyResponse(scope: AppEnvScope, response: GetSnapshotResponse) {
+    private fun applyResponse(scope: AppEnvScope, response: SnapshotResult) {
         if (response.changed) {
-            snapshotApplier.applySnapshot(scope, response.version, response.documentsList)
+            snapshotApplier.applySnapshot(scope, response.version, response.documents)
         }
     }
 
@@ -162,7 +162,7 @@ internal class RefreshScheduler(
 
     private companion object {
         private const val REFRESH_INTERVAL_SECONDS = 15L
-        private const val BOOTSTRAP_GRPC_MAX_ATTEMPTS = 3
+        private const val REFRESH_MAX_ATTEMPTS = 3
         private const val REFRESH_GRPC_MAX_ATTEMPTS = 2
     }
 }

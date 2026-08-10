@@ -4,12 +4,11 @@ import gg.grounds.config.ConfigRegistrationException
 import gg.grounds.config.ConfigRegistrationResult
 import gg.grounds.config.ConfigSnapshot
 import gg.grounds.config.ConfigStartupMode
-import gg.grounds.config.grpc.ConfigSyncClient
+import gg.grounds.config.client.ConfigDefaultData
+import gg.grounds.config.client.ConfigSyncClient
 import gg.grounds.config.internal.binding.ConfigBinding
 import gg.grounds.config.internal.scope.AppEnvScope
 import gg.grounds.config.nats.ConfigChangeListener
-import gg.grounds.grpc.config.ConfigDefault
-import gg.grounds.grpc.config.SyncDefaultsRequest
 import org.slf4j.Logger
 import tools.jackson.databind.ObjectMapper
 
@@ -68,30 +67,24 @@ internal class BootstrapCoordinator(
     ) {
         val json = objectMapper.writeValueAsString(binding.definition.defaultValue)
         val default =
-            ConfigDefault.newBuilder()
-                .setNamespace(binding.definition.namespace)
-                .setConfigKey(binding.definition.key)
-                .setDefaultContentJson(json)
-                .build()
-        val request =
-            SyncDefaultsRequest.newBuilder()
-                .setApp(scope.app)
-                .setEnv(scope.env)
-                .addDefaults(default)
-                .build()
+            ConfigDefaultData(
+                namespace = binding.definition.namespace,
+                configKey = binding.definition.key,
+                defaultContentJson = json,
+            )
         val response =
-            executeRetryableGrpcCall(
+            executeRetryableCall(
                 logger = logger,
                 scope = scope,
                 operation = "sync_defaults",
-                maxAttempts = BOOTSTRAP_GRPC_MAX_ATTEMPTS,
+                maxAttempts = BOOTSTRAP_MAX_ATTEMPTS,
                 sleepMillis = sleepMillis,
             ) {
-                client.syncDefaults(request)
+                client.syncDefaults(scope.app, scope.env, listOf(default))
             }
-        if (response.createdKeysList.isNotEmpty()) {
+        if (response.createdKeys.isNotEmpty()) {
             val createdKeys =
-                response.createdKeysList.map { createdKey ->
+                response.createdKeys.map { createdKey ->
                     "${createdKey.namespace}/${createdKey.configKey}"
                 }
             logger.info(
@@ -182,6 +175,6 @@ internal class BootstrapCoordinator(
     }
 
     private companion object {
-        private const val BOOTSTRAP_GRPC_MAX_ATTEMPTS = 3
+        private const val BOOTSTRAP_MAX_ATTEMPTS = 3
     }
 }
