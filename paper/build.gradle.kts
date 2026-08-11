@@ -1,3 +1,3 @@
-plugins { id("gg.grounds.paper-conventions") }
+plugins { id("gg.grounds.paper-runtime-consumer-conventions") }
 
 dependencies { implementation(project(":common")) }
