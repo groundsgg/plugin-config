@@ -2,13 +2,21 @@ name: Release
 
 on:
   push:
-    tags:
-      - "*"
-
-permissions:
-  contents: write
-  packages: write
+    tags: [v*]
 
 jobs:
-  reusable:
+  maven:
+    permissions:
+      contents: read
+      packages: write
+    secrets:
+      PACKAGES_TOKEN: ${{ secrets.GROUNDS_PACKAGES_TOKEN }}
     uses: groundsgg/.github/.github/workflows/gradle-publish.yml@main
+
+  docker:
+    permissions:
+      contents: write
+      packages: write
+    secrets:
+      PACKAGES_TOKEN: ${{ secrets.GROUNDS_PACKAGES_TOKEN }}
+    uses: groundsgg/.github/.github/workflows/docker-gradle-build-push.yml@main
