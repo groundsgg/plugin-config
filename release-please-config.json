@@ -1,7 +1,12 @@
 {
-  "release-type": "go",
-  "include-component-in-tag": false,
   "packages": {
-    ".": {}
+    ".": {
+      "release-type": "simple",
+      "package-name": "plugin-config",
+      "initial-version": "1.0.0",
+      "include-v-in-tag": true,
+      "include-component-in-tag": false,
+      "extra-files": ["version.txt"]
+    }
   }
 }
