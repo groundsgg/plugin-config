@@ -36,6 +36,7 @@ internal class BootstrapCoordinator(
                     syncDefault(client, scope, binding)
                     null
                 } catch (error: Exception) {
+                    refreshScheduler.requireDefaultSync(scope)
                     error
                 }
             refreshScheduler.subscribeToChanges(listener, scope)

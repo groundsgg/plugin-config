@@ -23,6 +23,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -435,6 +436,67 @@ class ConfigScopeSynchronizerTest {
         } finally {
             synchronizer.close()
             cacheDirectory.toFile().deleteRecursively()
+            executors.forEach { executor -> executor.shutdownNow() }
+        }
+    }
+
+    @Test
+    fun `periodic refresh seeds an uninitialized degraded binding after the service recovers`() {
+        val serviceAvailable = AtomicBoolean(false)
+        val refreshCompleted = CountDownLatch(1)
+        var onChangeReceived: (() -> Unit)? = null
+        val client =
+            RecordingConfigSyncClient(
+                syncDefaultsHandler = {
+                    if (!serviceAvailable.get()) {
+                        throw ConfigServiceException("service unavailable", 503)
+                    }
+                    SyncDefaultsResult(version = 1, createdKeys = emptyList())
+                },
+                getSnapshotHandler = {
+                    check(syncDefaultCalls >= 4) { "defaults were not re-synced" }
+                    refreshCompleted.countDown()
+                    defaultSnapshotResponse(version = 1, value = "recovered")
+                },
+            )
+        val executors = mutableListOf<ScheduledExecutorService>()
+        val synchronizer =
+            ConfigScopeSynchronizer(
+                logger = LoggerFactory.getLogger("ConfigScopeSynchronizerRecoveryTest"),
+                configClientFactory = { client },
+                natsListenerFactory = {
+                    RecordingConfigChangeListener { callback -> onChangeReceived = callback }
+                },
+                refreshExecutorFactory = {
+                    Executors.newSingleThreadScheduledExecutor().also { executor ->
+                        executors += executor
+                    }
+                },
+                sleepMillis = {},
+            )
+        val scope = AppEnvScope(app = "test-app", env = "dev")
+        val binding = ConfigBinding(TestStringConfig)
+        scope.putBindingIfAbsent(
+            ConfigKey(TestStringConfig.namespace, TestStringConfig.key),
+            binding,
+        )
+
+        try {
+            synchronizer.start("dns:///config", "nats://localhost:4222")
+            assertEquals(
+                ConfigRegistrationStatus.NOT_READY,
+                synchronizer.bootstrap(scope, binding, ConfigStartupMode.DEGRADED).status,
+            )
+
+            serviceAvailable.set(true)
+            checkNotNull(onChangeReceived).invoke()
+
+            assertTrue(refreshCompleted.await(1, TimeUnit.SECONDS))
+            assertTrue(binding.initialized())
+            assertEquals("recovered", binding.get())
+            assertEquals(4, client.syncDefaultCalls)
+        } finally {
+            synchronizer.close()
             executors.forEach { executor -> executor.shutdownNow() }
         }
     }

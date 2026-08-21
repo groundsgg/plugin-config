@@ -1,6 +1,8 @@
 package gg.grounds.config.internal.sync
 
+import gg.grounds.config.client.ConfigDefaultData
 import gg.grounds.config.client.SnapshotResult
+import gg.grounds.config.internal.binding.ConfigBinding
 import gg.grounds.config.internal.scope.AppEnvScope
 import gg.grounds.config.nats.ConfigChangeListener
 import java.util.concurrent.ConcurrentHashMap
@@ -9,9 +11,11 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import org.slf4j.Logger
+import tools.jackson.databind.ObjectMapper
 
 internal class RefreshScheduler(
     private val logger: Logger,
+    private val objectMapper: ObjectMapper,
     private val snapshotApplier: SnapshotApplier,
     private val refreshExecutorFactory: () -> ScheduledExecutorService,
     private val refreshWorkerExecutorFactory: () -> ExecutorService,
@@ -20,6 +24,7 @@ internal class RefreshScheduler(
     private val withLifecycleReadLock: ((() -> Unit) -> Unit),
 ) {
     private val trackedScopes = ConcurrentHashMap.newKeySet<AppEnvScope>()
+    private val scopesRequiringDefaultSync = ConcurrentHashMap.newKeySet<AppEnvScope>()
     private var refreshExecutor: ScheduledExecutorService? = null
     private var refreshFuture: ScheduledFuture<*>? = null
     private var refreshWorkerExecutor: ExecutorService? = null
@@ -42,6 +47,7 @@ internal class RefreshScheduler(
         refreshWorkerExecutor?.shutdownNow()
         refreshWorkerExecutor = null
         trackedScopes.clear()
+        scopesRequiringDefaultSync.clear()
     }
 
     fun close() {
@@ -51,6 +57,10 @@ internal class RefreshScheduler(
 
     fun trackScope(scope: AppEnvScope) {
         trackedScopes.add(scope)
+    }
+
+    fun requireDefaultSync(scope: AppEnvScope) {
+        scopesRequiringDefaultSync.add(scope)
     }
 
     fun subscribeToChanges(listener: ConfigChangeListener, scope: AppEnvScope) {
@@ -91,6 +101,10 @@ internal class RefreshScheduler(
         forceFullSnapshot: Boolean,
     ) {
         val requiresFullSnapshot = forceFullSnapshot || scope.hasUninitializedBindings()
+        if (scopesRequiringDefaultSync.contains(scope)) {
+            syncUninitializedDefaults(client, scope)
+            scopesRequiringDefaultSync.remove(scope)
+        }
         val response =
             if (requiresFullSnapshot) {
                 executeRetryableCall(
@@ -114,6 +128,34 @@ internal class RefreshScheduler(
                 }
             }
         applyResponse(scope, response)
+    }
+
+    private fun syncUninitializedDefaults(
+        client: gg.grounds.config.client.ConfigSyncClient,
+        scope: AppEnvScope,
+    ) {
+        val defaults =
+            scope.bindingsSnapshot().values.filterNot(ConfigBinding<*>::initialized).map { binding
+                ->
+                ConfigDefaultData(
+                    namespace = binding.definition.namespace,
+                    configKey = binding.definition.key,
+                    defaultContentJson =
+                        objectMapper.writeValueAsString(binding.definition.defaultValue),
+                )
+            }
+        if (defaults.isEmpty()) {
+            return
+        }
+        executeRetryableCall(
+            logger = logger,
+            scope = scope,
+            operation = "sync_defaults",
+            maxAttempts = REFRESH_MAX_ATTEMPTS,
+            sleepMillis = sleepMillis,
+        ) {
+            client.syncDefaults(scope.app, scope.env, defaults)
+        }
     }
 
     private fun applyResponse(scope: AppEnvScope, response: SnapshotResult) {

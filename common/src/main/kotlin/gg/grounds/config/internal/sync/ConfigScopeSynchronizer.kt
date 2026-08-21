@@ -58,6 +58,7 @@ internal class ConfigScopeSynchronizer(
     private val refreshScheduler =
         RefreshScheduler(
             logger = logger,
+            objectMapper = objectMapper,
             snapshotApplier = snapshotApplier,
             refreshExecutorFactory = refreshExecutorFactory,
             refreshWorkerExecutorFactory = refreshWorkerExecutorFactory,
