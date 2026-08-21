@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/groundsgg/plugin-config/compare/v1.0.0...v1.0.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **release:** publish plugin config image ([#15](https://github.com/groundsgg/plugin-config/issues/15)) ([2715c31](https://github.com/groundsgg/plugin-config/commit/2715c3113a0e56da12a51f005297ecd6b1fc22ff))
+
 ## [1.0.0](https://github.com/groundsgg/plugin-config/compare/v0.1.0...v1.0.0) (2026-08-10)
 
 
