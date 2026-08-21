@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/groundsgg/plugin-config/compare/v1.0.1...v1.0.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* retry default config sync after degraded bootstrap ([#17](https://github.com/groundsgg/plugin-config/issues/17)) ([210a881](https://github.com/groundsgg/plugin-config/commit/210a881278cd90e75814c449ab9132e707675942))
+
 ## [1.0.1](https://github.com/groundsgg/plugin-config/compare/v1.0.0...v1.0.1) (2026-08-21)
 
 
