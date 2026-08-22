@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/groundsgg/plugin-config/compare/v1.0.2...v1.0.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* initialize late config bindings ([#19](https://github.com/groundsgg/plugin-config/issues/19)) ([f29f9cb](https://github.com/groundsgg/plugin-config/commit/f29f9cb6b28491aaa24e924cba60a657ca725d66))
+
 ## [1.0.2](https://github.com/groundsgg/plugin-config/compare/v1.0.1...v1.0.2) (2026-08-21)
 
 
