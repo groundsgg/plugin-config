@@ -4,7 +4,7 @@ repositories { mavenCentral() }
 
 dependencies {
     compileOnly("org.slf4j:slf4j-api:2.0.18")
-    implementation("io.nats:jnats:2.25.2")
+    implementation("io.nats:jnats:2.26.2")
     // service-config answers REST; the client parses its JSON with the same
     // Jackson 3 line the snapshot applier already uses.
     implementation("tools.jackson.core:jackson-databind:3.2.2")
