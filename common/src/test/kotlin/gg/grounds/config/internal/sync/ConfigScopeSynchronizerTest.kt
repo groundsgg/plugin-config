@@ -227,6 +227,61 @@ class ConfigScopeSynchronizerTest {
     }
 
     @Test
+    fun `late registration applies an unchanged full snapshot to its new binding`() {
+        val client =
+            RecordingConfigSyncClient(
+                getSnapshotHandler = {
+                    SnapshotResult(
+                        changed = true,
+                        version = 1,
+                        documents =
+                            listOf(
+                                ConfigDocumentData(
+                                    namespace = TestStringConfig.namespace,
+                                    configKey = TestStringConfig.key,
+                                    contentJson = "\"first\"",
+                                ),
+                                ConfigDocumentData(
+                                    namespace = TestSecondConfig.namespace,
+                                    configKey = TestSecondConfig.key,
+                                    contentJson = "\"edge\"",
+                                ),
+                            ),
+                    )
+                }
+            )
+        val executor = Executors.newSingleThreadScheduledExecutor()
+        val synchronizer =
+            ConfigScopeSynchronizer(
+                logger = LoggerFactory.getLogger("ConfigScopeSynchronizerLateRegistrationTest"),
+                configClientFactory = { client },
+                natsListenerFactory = { RecordingConfigChangeListener() },
+                refreshExecutorFactory = { executor },
+            )
+        val scope = AppEnvScope(app = "network", env = "stage")
+        val first = ConfigBinding(TestStringConfig)
+        scope.putBindingIfAbsent(ConfigKey(TestStringConfig.namespace, TestStringConfig.key), first)
+
+        try {
+            synchronizer.start("http://config", "nats://localhost:4222")
+            synchronizer.bootstrap(scope, first, ConfigStartupMode.FAIL_CLOSED)
+            val late = ConfigBinding(TestSecondConfig)
+            scope.putBindingIfAbsent(
+                ConfigKey(TestSecondConfig.namespace, TestSecondConfig.key),
+                late,
+            )
+
+            synchronizer.bootstrap(scope, late, ConfigStartupMode.FAIL_CLOSED)
+
+            assertTrue(late.initialized())
+            assertEquals("edge", late.get())
+        } finally {
+            synchronizer.close()
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
     fun `bootstrap retries transient grpc failures`() {
         val retryDelays = CopyOnWriteArrayList<Long>()
         val client =
@@ -832,6 +887,14 @@ class ConfigScopeSynchronizerTest {
             key = "message",
             type = String::class.java,
             defaultValue = "default",
+        )
+
+    private object TestSecondConfig :
+        ConfigDefinition<String>(
+            namespace = "resourcepacks",
+            key = "global",
+            type = String::class.java,
+            defaultValue = "stable",
         )
 
     private class RecordingConfigSyncClient(
