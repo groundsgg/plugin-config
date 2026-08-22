@@ -28,14 +28,7 @@ internal class SnapshotApplier(
             return
         }
         if (version == currentVersion) {
-            logger.debug(
-                "Config snapshot ignored (app={}, env={}, version={}, currentVersion={}, documents={}, reason=version_not_newer)",
-                scope.app,
-                scope.env,
-                version,
-                currentVersion,
-                documents.size,
-            )
+            applyUninitializedBindings(scope, version, currentVersion, documents)
             return
         }
         val documentsByKey =
@@ -62,6 +55,36 @@ internal class SnapshotApplier(
             logger.debug(message, scope.app, scope.env, version, currentVersion, documents.size)
         } else {
             logger.info(message, scope.app, scope.env, version, currentVersion, documents.size)
+        }
+    }
+
+    private fun applyUninitializedBindings(
+        scope: AppEnvScope,
+        version: Long,
+        currentVersion: Long,
+        documents: List<ConfigDocumentData>,
+    ) {
+        val bindings = scope.bindingsSnapshot().filterValues { !it.initialized() }
+        if (bindings.isEmpty()) {
+            logger.debug(
+                "Config snapshot ignored (app={}, env={}, version={}, currentVersion={}, documents={}, reason=version_not_newer)",
+                scope.app,
+                scope.env,
+                version,
+                currentVersion,
+                documents.size,
+            )
+            return
+        }
+        val documentsByKey =
+            documents.associateBy { document -> ConfigKey(document.namespace, document.configKey) }
+        for ((configKey, binding) in bindings) {
+            val document = documentsByKey[configKey]
+            if (document != null) {
+                applyDocument(binding, document.contentJson)
+            } else {
+                handleMissingDocument(scope, binding)
+            }
         }
     }
 
